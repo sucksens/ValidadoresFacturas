@@ -1,0 +1,9 @@
+# librerias para el endpoint de correo 
+fastapi
+uvicorn 
+dnspython 
+pydantic
+aiosmtplib
+# primer endpoint
+tenacity
+cfdiclient

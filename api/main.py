@@ -1,8 +1,8 @@
 # IMPORTS
 # Imports de construccion de la API
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Annotated
+from pydantic import BaseModel, Field, EmailStr
+from typing import Annotated, Optional
 import uuid as uuid_lib
 # Imports de reintentos y manejo multihilo para no lockear las llamadas
 import asyncio
@@ -10,17 +10,24 @@ import traceback
 from tenacity import retry, stop_after_attempt, wait_fixed
 # Import de cfdiclient requerimiento basico de validacion
 from cfdiclient import Validacion
+#import del endpoint de email
+import dns.resolver
+import aiosmtplib
 
 
 # --- Inicialización de la Aplicación FastAPI ---
 app = FastAPI(
-    title="API de Validación de Documentos CFDI",
-    description="Una API RESTful para validar información de documentos CFDI usando RFC del emisor, RFC del receptor, total y UUID.",
-    version="1.0.0"
+    title="API de Validaciónes Interna",
+    description="Una API RESTful para hacer diferentes validaciones, desde cfdis hasta validaciones de correo. ",
+    version="1.0.1"
 )
 
 
-# --- Modelos de Datos para la Solicitud y Respuesta ---
+"""
+    -----------------------------------------------------------------------------------------------------
+    Modelos de Solicitud: 
+    -----------------------------------------------------------------------------------------------------
+"""
 class DocumentRequest(BaseModel):
     """
     Define la estructura de datos para la solicitud POST al endpoint de validación.
@@ -32,6 +39,19 @@ class DocumentRequest(BaseModel):
     uuid: Annotated[uuid_lib.UUID, Field()]
 
 
+class EmailRequest(BaseModel):
+    """
+    Modelos del Request del endpoint de validacion de correo
+    """
+    email: EmailStr
+
+
+
+"""
+    -----------------------------------------------------------------------------------------------------
+    Modelos de Respuesta: 
+    -----------------------------------------------------------------------------------------------------
+"""
 class DocumentResponse(BaseModel):
     """
     Define la estructura de datos para la respuesta del endpoint de validación.
@@ -45,6 +65,20 @@ class DocumentResponse(BaseModel):
     id_operacion: uuid_lib.UUID = Field(description="Un ID único generado para esta operación de validación específica, "
                                                     "útil para el seguimiento de solicitudes.")
     procesamiento_exitoso: bool = Field(description="Indica si la operación de procesamiento y validación se completó sin errores.")
+
+
+class EmailValidationResponse(BaseModel):
+    """
+    Define la estructura de datos de la respues del endpoint de validacion del correo.
+    Proporciona informacion clara sobre los resultados de la operacion.
+    """
+    email: str = Field(description="El correo que se envio a validar")
+    domain_has_mx: bool = Field(description="Un booleano que te dice si el dominio existe y si tiene correo")
+    domain_mx_records: Optional[list[str]]  = None
+    smtp_check_posible: bool = False
+    smtp_check_result: Optional[str] = None # "accepted", "rejected", "timeout", "error"
+    exists: Optional[bool] = None # Solo si el smtp check es positivo
+    error: Optional[str] = None
 
 
 # Reintento automático: hasta 3 intentos con 2 segundos entre cada uno
@@ -61,6 +95,11 @@ def obtener_estado_con_reintento(validacion, documento):
     )
 
 
+"""
+    -----------------------------------------------------------------------------------------------------
+    Endpoints: 
+    -----------------------------------------------------------------------------------------------------
+"""
 @app.post("/validar_factura/", response_model=DocumentResponse)
 async def validar_factura(documento: DocumentRequest):
     """
@@ -114,6 +153,70 @@ async def validar_factura(documento: DocumentRequest):
             status_code=500,
             detail=f"Error interno del servidor al validar la factura: {str(e)}"
         )
+
+
+@app.post("/validar_email", response_model=EmailValidationResponse)
+async def validar_email(request: EmailRequest):
+    email = request.email
+    domain = email.split('@')[1]
+
+    response = EmailValidationResponse(
+        email=email,
+        domain_has_mx=False,
+        domain_mx_records=[],
+        smtp_check_possible=False,
+        smtp_check_result=None,
+        exists=None,
+        error=None
+    )
+
+    # 1. Verificar registros MX del dominio
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        mx_list = [str(mx.exchange).rstrip('.') for mx in mx_records]
+        response.domain_has_mx = True
+        response.domain_mx_records = mx_list
+    except Exception as e:
+        response.error = f"Error resolving MX records: {str(e)}"
+        return response
+
+    # 2. Opcional: Intentar verificar existencia real del correo vía SMTP (con advertencias)
+    # ⚠️ Esto NO es 100% confiable. Muchos servidores rechazan o ignoran estos checks por anti-spam.
+    try:
+        # Tomar el primer servidor MX
+        mx_host = response.domain_mx_records[0]
+        # Conectar al servidor SMTP del dominio
+        server = aiosmtplib.SMTP(timeout=10)
+        await server.connect(mx_host, port=25)  # Puerto 25 estándar para SMTP
+
+        # Enviar comandos SMTP básicos
+        await server.helo()  # o ehlo
+        await server.mail("validator@tudominio.com")  # Remitente ficticio
+        code, message = await server.rcpt(email)  # Intentar destinatario
+
+        await server.quit()
+
+        # Interpretar respuesta
+        if code == 250:
+            response.smtp_check_possible = True
+            response.smtp_check_result = "accepted"
+            response.exists = True
+        elif code in (550, 553):
+            response.smtp_check_possible = True
+            response.smtp_check_result = "rejected"
+            response.exists = False
+        else:
+            response.smtp_check_possible = True
+            response.smtp_check_result = f"unknown_code_{code}"
+            response.exists = None  # Incierto
+
+    except asyncio.TimeoutError:
+        response.smtp_check_result = "timeout"
+    except Exception as smtp_error:
+        response.smtp_check_result = "error"
+        response.error = f"SMTP check failed: {str(smtp_error)}"
+
+    return response
 
 
 # --- Instrucciones para Ejecutar la Aplicación ---
