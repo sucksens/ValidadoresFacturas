@@ -43,7 +43,7 @@ class EmailRequest(BaseModel):
     """
     Modelos del Request del endpoint de validacion de correo
     """
-    email: EmailStr
+    email: Annotated[EmailStr, Field(min_length=5)]
 
 
 
@@ -155,7 +155,7 @@ async def validar_factura(documento: DocumentRequest):
         )
 
 
-@app.post("/validar_email", response_model=EmailValidationResponse)
+@app.post("/validar_email/", response_model=EmailValidationResponse)
 async def validar_email(request: EmailRequest):
     email = request.email
     domain = email.split('@')[1]
@@ -191,7 +191,7 @@ async def validar_email(request: EmailRequest):
 
         # Enviar comandos SMTP básicos
         await server.helo()  # o ehlo
-        await server.mail("validator@tudominio.com")  # Remitente ficticio
+        await server.mail("validator@motormexa.mx")  # Remitente ficticio
         code, message = await server.rcpt(email)  # Intentar destinatario
 
         await server.quit()
