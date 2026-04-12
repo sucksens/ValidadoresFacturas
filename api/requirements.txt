@@ -1,9 +1,11 @@
 # librerias para el endpoint de correo 
-fastapi
-uvicorn 
-dnspython 
-pydantic
-aiosmtplib
+fastapi == 0.117.1
+uvicorn == 0.37.0
+gunicorn == 23.0.0
+dnspython == 2.8.0
+pydantic  == 2.11.9
+aiosmtplib == 4.0.2
+pydantic[email]
 # primer endpoint
-tenacity
-cfdiclient
+tenacity == 9.1.2
+cfdiclient == 1.6.2

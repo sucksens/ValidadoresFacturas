@@ -1,0 +1,1 @@
+/home/sistemas/ValidadorFacturas/env_validador/bin/gunicorn -c /home/sistemas/ValidadorFacturas/api/gunicorn.conf.py main:app
