@@ -44,6 +44,7 @@ class EmailRequest(BaseModel):
     Modelos del Request del endpoint de validacion de correo
     """
     email: Annotated[EmailStr, Field(min_length=5)]
+    tipo: bool
 
 
 
@@ -158,6 +159,7 @@ async def validar_factura(documento: DocumentRequest):
 @app.post("/validar_email/", response_model=EmailValidationResponse)
 async def validar_email(request: EmailRequest):
     email = request.email
+    tipo = request.tipo
     domain = email.split('@')[1]
 
     response = EmailValidationResponse(
@@ -180,6 +182,8 @@ async def validar_email(request: EmailRequest):
         response.error = f"Error resolving MX records: {str(e)}"
         return response
 
+    if tipo:
+        return response
     # 2. Opcional: Intentar verificar existencia real del correo vía SMTP (con advertencias)
     # ⚠️ Esto NO es 100% confiable. Muchos servidores rechazan o ignoran estos checks por anti-spam.
     try:
