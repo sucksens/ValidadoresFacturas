@@ -1,0 +1,14 @@
+[Unit]
+Description=Gunicorn instance para servir la API de Validaciones
+After=network.target
+
+[Service]
+User=sistemas
+Group=sistemas
+WorkingDirectory=/home/sistemas/ValidadorFacturas/api
+Environment="PATH=/home/sistemas/ValidadorFacturas/env_validador/bin"
+ExecStart=/home/sistemas/ValidadorFacturas/env_validador/bin/gunicorn -c /home/sistemas/ValidadorFacturas/api/gunicorn.conf.py main:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
