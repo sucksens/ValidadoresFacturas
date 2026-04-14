@@ -9,3 +9,5 @@ pydantic[email]
 # primer endpoint
 tenacity == 9.1.2
 cfdiclient == 1.6.2
+# libreria para transformar XML CFDI
+pycfdi-transform == 0.1.0
