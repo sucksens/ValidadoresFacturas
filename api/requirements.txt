@@ -8,6 +8,6 @@ aiosmtplib == 4.0.2
 pydantic[email]
 # primer endpoint
 tenacity == 9.1.2
-cfdiclient == 1.6.2
+# cfdiclient == 1.6.2  # Reemplazado por clase local ValidacionClass
 # libreria para transformar XML CFDI
 pycfdi-transform == 0.1.0

@@ -10,8 +10,8 @@ import asyncio
 import traceback
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-# Import de cfdiclient requerimiento basico de validacion
-from cfdiclient import Validacion
+# Import de la clase local de validacion
+from ValidacionClass import Validacion
 
 # import del endpoint de email
 import dns.resolver
@@ -19,7 +19,6 @@ import aiosmtplib
 
 # Import de pycfdi-transform para parsear XML
 from pycfdi_transform import CFDI32SAXHandler, CFDI33SAXHandler, CFDI40SAXHandler
-from fastapi import File, UploadFile
 from fastapi import File, UploadFile
 
 
@@ -116,6 +115,16 @@ class DocumentResponse(BaseModel):
         "Valores posibles pueden incluir 'VIGENTE', 'CANCELADO', 'ERROR', etc., "
         "dependiendo de la respuesta del servicio de validación."
     )
+    codigo_estatus: str = Field(
+        description="El código de estatus de la respuesta del SAT."
+    )
+    es_cancelable: str = Field(description="Indica si el comprobante es cancelable.")
+    estatus_cancelacion: Optional[str] = Field(
+        default=None, description="El estatus de cancelación del comprobante."
+    )
+    validacion_efos: Optional[str] = Field(
+        default=None, description="El resultado de la validación EFOS."
+    )
     id_operacion: uuid_lib.UUID = Field(
         description="Un ID único generado para esta operación de validación específica, "
         "útil para el seguimiento de solicitudes."
@@ -169,7 +178,7 @@ def obtener_estado_con_reintento(validacion, documento):
 async def validar_factura(documento: DocumentRequest):
     """
     Endpoint POST que recibe los datos de un documento CFDI para su validación.
-    Utiliza el módulo 'cfdiclient' para obtener el estado del documento y
+    Utiliza la clase local Validacion para obtener el estado del documento y
     devuelve una respuesta estructurada con la información de la validación.
 
     **Parámetros de la Solicitud (en el cuerpo JSON):**
@@ -181,10 +190,10 @@ async def validar_factura(documento: DocumentRequest):
     **Respuestas HTTP:**
     - `200 OK`: Retorna un `DocumentResponse` si la validación se procesa correctamente.
     - `422 Unprocessable Entity`: Si los datos de entrada no cumplen con las validaciones de Pydantic (ej. formato de RFC, tipo de total, formato de UUID).
-    - `500 Internal Server Error`: Si ocurre un error inesperado durante la ejecución de la lógica de validación o al interactuar con 'cfdiclient'.
+    - `500 Internal Server Error`: Si ocurre un error inesperado durante la ejecución de la lógica de validación.
     """
     try:
-        # Instancia la clase de validación del módulo 'cfdiclient'.
+        # Instancia la clase de validación local.
         # Esta instancia es la que interactúa con el servicio de validación real.
         validacion = Validacion(timeout=40)
         # Llama al método 'obtener_estado_con_reintento' con el objeto de validacion  en un su propio hilo para que no se bloqueé
@@ -192,9 +201,13 @@ async def validar_factura(documento: DocumentRequest):
             obtener_estado_con_reintento, validacion, documento
         )
 
-        # Extrae el estado de validación del diccionario de respuesta de 'cfdiclient'.
+        # Extrae el estado de validación del diccionario de respuesta.
         # Si 'estado' no está presente, se asigna 'DESCONOCIDO' como valor por defecto.
         estado_cfdi = estado_resultado.get("estado", "DESCONOCIDO")
+        codigo_estatus = estado_resultado.get("codigo_estatus", "DESCONOCIDO")
+        es_cancelable = estado_resultado.get("es_cancelable", "DESCONOCIDO")
+        estatus_cancelacion = estado_resultado.get("estatus_cancelacion")
+        validacion_efos = estado_resultado.get("validacion_efos")
 
         # Convierte el objeto de solicitud Pydantic a un diccionario para incluirlo en la respuesta.
         datos_recibidos_dict = documento.model_dump()
@@ -207,6 +220,10 @@ async def validar_factura(documento: DocumentRequest):
             mensaje="Factura procesada y validada exitosamente.",
             datos_recibidos=datos_recibidos_dict,
             estado_validacion=estado_cfdi,
+            codigo_estatus=codigo_estatus,
+            es_cancelable=es_cancelable,
+            estatus_cancelacion=estatus_cancelacion,
+            validacion_efos=validacion_efos,
             procesamiento_exitoso=True,
             id_operacion=id_operacion,
         )
