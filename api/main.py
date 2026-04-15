@@ -19,7 +19,17 @@ import aiosmtplib
 
 # Import de pycfdi-transform para parsear XML
 from pycfdi_transform import CFDI32SAXHandler, CFDI33SAXHandler, CFDI40SAXHandler
-from fastapi import File, UploadFile
+from fastapi import File, UploadFile, Form
+
+# Import para envio de email
+import os
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
 
 
 # --- Inicialización de la Aplicación FastAPI ---
@@ -151,6 +161,23 @@ class EmailValidationResponse(BaseModel):
     )
     exists: Optional[bool] = None  # Solo si el smtp check es positivo
     error: Optional[str] = None
+
+
+class EmailSendResponse(BaseModel):
+    """
+    Define la estructura de datos para la respuesta del endpoint de envio de archivos por correo.
+    """
+
+    exito: bool = Field(description="Indica si el correo fue enviado exitosamente")
+    mensaje: str = Field(
+        description="Mensaje descriptivo sobre el resultado de la operacion"
+    )
+    error: Optional[str] = Field(
+        default=None, description="Mensaje de error si el correo no pudo ser enviado"
+    )
+    id_operacion: uuid_lib.UUID = Field(
+        description="Un ID unico generado para esta operacion de envio"
+    )
 
 
 # Reintento automático: hasta 3 intentos con 2 segundos entre cada uno
@@ -354,6 +381,65 @@ def detectar_version_cfdi(xml_content: str) -> Optional[str]:
     return None
 
 
+async def enviar_email_con_adjuntos(
+    email_destino: str,
+    asunto: str,
+    mensaje_cuerpo: str,
+    xml_bytes: bytes,
+    xml_filename: str,
+    pdf_bytes: bytes,
+    pdf_filename: str,
+):
+    """
+    Envía un correo electrónico con archivos adjuntos usando SMTP configurado.
+    """
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = 587
+    smtp_port_env = os.getenv("SMTP_PORT")
+    if smtp_port_env:
+        smtp_port = int(smtp_port_env)
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    smtp_from_env = os.getenv("SMTP_FROM")
+    smtp_from = smtp_from_env if smtp_from_env else smtp_user
+
+    if not smtp_host or not smtp_user or not smtp_password or not smtp_from:
+        raise ValueError(
+            "Faltan configuraciones SMTP. Verifica las variables de entorno."
+        )
+
+    # Crear el mensaje
+    msg = MIMEMultipart()
+    msg["From"] = smtp_from
+    msg["To"] = email_destino
+    msg["Subject"] = asunto
+
+    # Agregar cuerpo del mensaje
+    msg.attach(MIMEText(mensaje_cuerpo, "plain"))
+
+    # Adjuntar XML
+    xml_attachment = MIMEApplication(xml_bytes, Name=xml_filename)
+    xml_attachment["Content-Disposition"] = f'attachment; filename="{xml_filename}"'
+    msg.attach(xml_attachment)
+
+    # Adjuntar PDF
+    pdf_attachment = MIMEApplication(pdf_bytes, Name=pdf_filename)
+    pdf_attachment["Content-Disposition"] = f'attachment; filename="{pdf_filename}"'
+    msg.attach(pdf_attachment)
+
+    # Enviar usando aiosmtplib
+    await aiosmtplib.send(
+        msg,
+        hostname=smtp_host,
+        port=smtp_port,
+        username=smtp_user,
+        password=smtp_password,
+        use_tls=smtp_use_tls,
+        timeout=30,
+    )
+
+
 @app.post("/parsear_xml/", response_model=XmlResponse)
 async def parsear_xml(file: UploadFile = File(...)):
     """
@@ -482,6 +568,142 @@ async def parsear_xml(file: UploadFile = File(...)):
             version=detected_version,
             datos=None,
             error=error_msg,
+        )
+
+
+@app.post("/enviar_archivos_por_correo/", response_model=EmailSendResponse)
+async def enviar_archivos_por_correo(
+    xml: UploadFile = File(..., description="Archivo XML a adjuntar"),
+    pdf: UploadFile = File(..., description="Archivo PDF a adjuntar"),
+    email_destino: Annotated[
+        EmailStr, Field(description="Correo electrónico destinatario")
+    ] = Form(...),
+    asunto: Annotated[str, Field(min_length=1, description="Asunto del correo")] = Form(
+        ...
+    ),
+    mensaje_cuerpo: Annotated[
+        str,
+        Field(default="Archivos adjuntos", description="Cuerpo del mensaje del correo"),
+    ] = Form(...),
+):
+    """
+    Endpoint que recibe un archivo XML, un PDF, un correo destino, un asunto y opcionalmente un mensaje cuerpo,
+    y envia estos archivos al correo proporcionado.
+
+    **Parámetros de la Solicitud (multipart/form-data):**
+    - `xml`: Archivo XML a adjuntar
+    - `pdf`: Archivo PDF a adjuntar
+    - `email_destino`: Correo electrónico destinatario
+    - `asunto`: Asunto del correo
+    - `mensaje_cuerpo`: Cuerpo del mensaje (opcional, por defecto "Archivos adjuntos")
+
+    **Respuestas HTTP:**
+    - `200 OK`: Retorna un `EmailSendResponse` si el correo fue enviado exitosamente
+    - `400 Bad Request`: Si los archivos no son válidos o faltan
+    - `413 Payload Too Large`: Si algún archivo excede el tamaño máximo
+    - `422 Unprocessable Entity`: Si los datos de entrada no cumplen con las validaciones
+    - `500 Internal Server Error`: Si ocurre un error durante el envío del correo
+    """
+    id_operacion = uuid_lib.uuid4()
+
+    try:
+        # Validación 1: Verificar extensión de archivos
+        if not xml.filename or not xml.filename.lower().endswith(".xml"):
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo XML debe tener extensión .xml",
+            )
+
+        if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo PDF debe tener extensión .pdf",
+            )
+
+        # Validación 2: Verificar tamaño de archivos
+        for archivo, nombre in [(xml, "XML"), (pdf, "PDF")]:
+            if archivo.size and archivo.size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"El archivo {nombre} excede el tamaño máximo de {MAX_FILE_SIZE // (1024 * 1024)}MB",
+                )
+
+        # Leer contenido de archivos
+        xml_content = await xml.read()
+        pdf_content = await pdf.read()
+
+        # Validación 3: Verificar que no estén vacíos
+        if not xml_content or len(xml_content) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo XML está vacío",
+            )
+
+        if not pdf_content or len(pdf_content) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="El archivo PDF está vacío",
+            )
+
+        # Validación 4: Verificar tamaño real después de leer
+        if len(xml_content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"El archivo XML excede el tamaño máximo de {MAX_FILE_SIZE // (1024 * 1024)}MB",
+            )
+
+        if len(pdf_content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"El archivo PDF excede el tamaño máximo de {MAX_FILE_SIZE // (1024 * 1024)}MB",
+            )
+
+        # Validar que el XML es seguro y está bien formado
+        if not validar_xml_seguro(xml_content):
+            return EmailSendResponse(
+                exito=False,
+                mensaje="El archivo XML no es válido",
+                error="XML malformado o estructura inválida",
+                id_operacion=id_operacion,
+            )
+
+        # Enviar email con los archivos adjuntos
+        await enviar_email_con_adjuntos(
+            email_destino=email_destino,
+            asunto=asunto,
+            mensaje_cuerpo=mensaje_cuerpo,
+            xml_bytes=xml_content,
+            xml_filename=xml.filename,
+            pdf_bytes=pdf_content,
+            pdf_filename=pdf.filename,
+        )
+
+        return EmailSendResponse(
+            exito=True,
+            mensaje=f"Correo enviado exitosamente a {email_destino}",
+            error=None,
+            id_operacion=id_operacion,
+        )
+
+    except HTTPException:
+        raise
+
+    except ValueError as ve:
+        return EmailSendResponse(
+            exito=False,
+            mensaje="Error de configuración SMTP",
+            error=str(ve),
+            id_operacion=id_operacion,
+        )
+
+    except Exception as e:
+        traceback_str = "".join(traceback.format_exception(None, e, e.__traceback__))
+        print(f"ERROR durante envío de correo: {traceback_str}")
+        return EmailSendResponse(
+            exito=False,
+            mensaje="Error al enviar el correo",
+            error=str(e),
+            id_operacion=id_operacion,
         )
 
 
