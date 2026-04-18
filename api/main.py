@@ -393,37 +393,42 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
 
                 # Llenar los campos del formulario
                 for campo_request, valor in datos_formulario.items():
-                    if valor is not None:
-                        campo_pdf = mapeo_campos.get(campo_request)
-                        if campo_pdf:
-                            # Buscar el campo en el PDF
-                            for field in fields:
-                                field_name = field.T
+                    campo_pdf = mapeo_campos.get(campo_request)
+                    if campo_pdf:
+                        # Buscar el campo en el PDF
+                        for field in fields:
+                            field_name = field.T
 
-                                # Decodificar el nombre del campo si es bytes
-                                if isinstance(field_name, bytes):
-                                    field_name = field_name.decode('utf-8', errors='ignore')
+                            # Decodificar el nombre del campo si es bytes
+                            if isinstance(field_name, bytes):
+                                field_name = field_name.decode('utf-8', errors='ignore')
 
-                                # Eliminar paréntesis del nombre del campo (pdfrw los incluye)
-                                field_name_clean = field_name.strip('()')
+                            # Eliminar paréntesis del nombre del campo (pdfrw los incluye)
+                            field_name_clean = field_name.strip('()')
 
-                                if field_name_clean == campo_pdf:
-                                    # Determinar el tipo de campo
-                                    field_type = field.FT
+                            if field_name_clean == campo_pdf:
+                                # Determinar el tipo de campo
+                                field_type = field.FT
 
-                                    if field_type == '/Tx':  # Campo de texto
+                                if field_type == '/Tx':  # Campo de texto
+                                    if valor is not None:
                                         if isinstance(valor, bool):
                                             # Si es boolean, convertir a string
                                             field.V = str(valor)
                                         else:
                                             field.V = str(valor)
-                                    elif field_type == '/Btn':  # Campo de botón/checkbox
+                                    else:
+                                        field.V = ''
+                                elif field_type == '/Btn':  # Campo de botón/checkbox
+                                    if valor is not None:
                                         if valor:
                                             # Para checkboxes, usamos el valor /Yes
                                             field.V = pdfrw.PdfName('/Yes')
                                         else:
                                             field.V = pdfrw.PdfName('/Off')
-                                    break
+                                    else:
+                                        field.V = pdfrw.PdfName('/Off')
+                                break
 
         # Generar el PDF en memoria
         from io import BytesIO
