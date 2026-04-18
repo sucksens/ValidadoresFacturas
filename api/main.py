@@ -28,6 +28,10 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from dotenv import load_dotenv
 
+# Import para manipular PDFs
+import PyPDF2
+import pdfrw
+
 # Cargar variables de entorno
 load_dotenv()
 
@@ -66,6 +70,95 @@ class EmailRequest(BaseModel):
 
     email: Annotated[EmailStr, Field(min_length=5)]
     tipo: bool
+
+
+class PdfFormRequest(BaseModel):
+    """
+    Modelo de solicitud para llenar el formulario PDF V1J AUTO.
+    Todos los campos son opcionales para permitir llenar solo algunos campos.
+    """
+
+    # Campos de texto
+    entidad: Optional[str] = None
+    ext: Optional[str] = None
+    int_: Optional[str] = Field(default=None, alias="int")
+    col: Optional[str] = None
+    postal: Optional[str] = None
+    correo_1: Optional[str] = Field(default=None, alias="correo_1")
+    denominacion_razon_social_1: Optional[str] = Field(default=None, alias="denominacion_razon_social_1")
+    denominacion_razon_social_2: Optional[str] = Field(default=None, alias="denominacion_razon_social_2")
+    regimen_sociedad: Optional[str] = Field(default=None, alias="regimen_sociedad")
+    entre: Optional[str] = None
+    y_de: Optional[str] = Field(default=None, alias="y_de")
+    calle: Optional[str] = None
+    tipo_vialidad: Optional[str] = Field(default=None, alias="tipo_vialidad")
+    mpo: Optional[str] = None
+    marca: Optional[str] = None
+    tipo: Optional[str] = None
+    rfc: Optional[str] = Field(default=None, alias="rfc")
+    curp: Optional[str] = None
+    apellido_paterno: Optional[str] = Field(default=None, alias="apellido_paterno")
+    apellido_materno: Optional[str] = Field(default=None, alias="apellido_materno")
+    nombre: Optional[str] = None
+    num_escritura: Optional[str] = Field(default=None, alias="num_escritura")
+    foja: Optional[str] = None
+    modelo: Optional[str] = None
+    no_motor: Optional[str] = Field(default=None, alias="no_motor")
+    serie: Optional[str] = None
+    color: Optional[str] = None
+    folio_fiscal: Optional[str] = Field(default=None, alias="folio_fiscal")
+    telefono: Optional[str] = None
+    mes_2: Optional[str] = Field(default=None, alias="mes_2")
+    anio: Optional[str] = Field(default=None, alias="anio")
+    ndp: Optional[str] = None
+    registro_estatal: Optional[str] = Field(default=None, alias="registro_estatal")
+    mes_final: Optional[str] = Field(default=None, alias="mes_final")
+    fecha_final: Optional[str] = Field(default=None, alias="fecha_final")
+    anio_2: Optional[str] = Field(default=None, alias="anio_2")
+    libro: Optional[str] = None
+    localidad: Optional[str] = None
+    dia_2: Optional[str] = Field(default=None, alias="dia_2")
+    anio_3: Optional[str] = Field(default=None, alias="anio_3")
+    dia: Optional[str] = None
+    tipo_sol: Optional[str] = Field(default=None, alias="tipo_sol")
+    mes: Optional[str] = None
+    lugar_fecha: Optional[str] = Field(default=None, alias="lugar_fecha")
+    placa_ant: Optional[str] = Field(default=None, alias="placa_ant")
+    calle_posterior: Optional[str] = Field(default=None, alias="calle_posterior")
+    no_placa: Optional[str] = Field(default=None, alias="no_placa")
+    entidad_federativa: Optional[str] = Field(default=None, alias="entidad_federativa")
+    no: Optional[str] = None
+    n_orf: Optional[str] = Field(default=None, alias="n_orf")
+    facturacion: Optional[str] = None
+
+    # Campos de checkbox (boolean)
+    trasera: Optional[bool] = None
+    cp: Optional[bool] = Field(default=None, alias="cp")
+    pn: Optional[bool] = Field(default=None, alias="pn")
+    delamtera: Optional[bool] = None
+    ninguna: Optional[bool] = None
+    unica_motocicleta: Optional[bool] = Field(default=None, alias="unica_motocicleta")
+    servicios_pub: Optional[bool] = Field(default=None, alias="servicios_pub")
+    servicios_pri: Optional[bool] = Field(default=None, alias="servicios_pri")
+    camioneta: Optional[bool] = None
+    camion: Optional[bool] = None
+    minibus: Optional[bool] = None
+    remolque: Optional[bool] = None
+    motocicleta: Optional[bool] = None
+    cuatrimoto: Optional[bool] = None
+    taxi: Optional[bool] = None
+    gasolina: Optional[bool] = None
+    electrico_hibrido: Optional[bool] = Field(default=None, alias="electrico_hibrido")
+    hibrido: Optional[bool] = None
+    diesel: Optional[bool] = None
+    gas: Optional[bool] = None
+    gas_lp: Optional[bool] = Field(default=None, alias="gas_lp")
+    no_usa: Optional[bool] = Field(default=None, alias="no_usa")
+    otros: Optional[bool] = None
+    dictamen: Optional[bool] = None
+    ambas: Optional[bool] = None
+    concesion: Optional[bool] = None
+    denuncia: Optional[bool] = None
 
 
 class XmlResponse(BaseModel):
@@ -192,6 +285,162 @@ def obtener_estado_con_reintento(validacion, documento):
         total=str(documento.total),
         uuid=str(documento.uuid),
     )
+
+
+def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> bytes:
+    """
+    Llena los campos de un formulario PDF con los datos proporcionados.
+
+    Args:
+        pdf_template_path: Ruta al PDF template
+        datos_formulario: Diccionario con los datos del formulario
+
+    Returns:
+        bytes: Contenido del PDF generado con los campos llenos
+    """
+    try:
+        # Leer el PDF template usando pdfrw
+        template_pdf = pdfrw.PdfReader(pdf_template_path)
+
+        # Crear un diccionario de mapeo entre campos del request y campos del PDF
+        mapeo_campos = {
+            'entidad': 'ENTIDAD',
+            'ext': 'EXT',
+            'int_': 'INT',
+            'col': 'COL',
+            'postal': 'POSTAL',
+            'correo_1': 'CORREO 1',
+            'denominacion_razon_social_1': 'DENOMINACIÓN O RAZON SOCIAL_1',
+            'denominacion_razon_social_2': 'DENOMINACIÓN O RAZON SOCIAL_2',
+            'regimen_sociedad': 'RÉGIMEN DE SOCIEDAD',
+            'entre': 'ENTRE',
+            'y_de': 'Y DE',
+            'calle': 'CALLE',
+            'tipo_vialidad': 'TIPO DE VIALIDAD',
+            'mpo': 'MPO',
+            'marca': 'MARCA',
+            'tipo': 'TIPO',
+            'rfc': 'Registro Federal Contribuyente',
+            'curp': 'CURP',
+            'apellido_paterno': 'APELLIDO PATERNO',
+            'apellido_materno': 'APELLIDO MATERNO',
+            'nombre': 'NOMBRE',
+            'num_escritura': 'Núm Escritura',
+            'foja': 'FOJA',
+            'modelo': 'MODELO',
+            'no_motor': 'NO MOTOR',
+            'serie': 'SERIE',
+            'color': 'COLOR',
+            'folio_fiscal': 'FOLIO FISCAL',
+            'telefono': 'TELEFONO',
+            'mes_2': 'Mes_2',
+            'anio': 'Año',
+            'ndp': 'NDP',
+            'registro_estatal': 'Registro Estatal',
+            'mes_final': 'MES FINAL',
+            'fecha_final': 'FECHA FINAL',
+            'anio_2': 'AÑO',
+            'libro': 'LIBRO',
+            'localidad': 'LOCALIDAD',
+            'dia_2': 'Día_2',
+            'anio_3': 'Año_2',
+            'dia': 'Día',
+            'tipo_sol': 'TipoSol',
+            'mes': 'Mes',
+            'lugar_fecha': 'Lugar y fecha',
+            'placa_ant': 'PLACA ANT',
+            'calle_posterior': 'CALLER POSTERIOR',
+            'no_placa': 'No Placa',
+            'entidad_federativa': 'ENTIDAD FEDERATIVA',
+            'no': 'NO',
+            'n_orf': 'N ORF',
+            'facturacion': 'FACTURACIÓN',
+            'trasera': 'TRASERA',
+            'cp': 'CP',
+            'pn': 'PN',
+            'delamtera': 'DELAMTERA',
+            'ninguna': 'NINGUNA',
+            'unica_motocicleta': 'UNICA PARA MOTOCICLETA',
+            'servicios_pub': 'SERVICIOS PUB',
+            'servicios_pri': 'SERVICIOS PRI',
+            'camioneta': 'CAMIONETA',
+            'camion': 'CAMIÓN',
+            'minibus': 'MINIBÚS',
+            'remolque': 'REMOLQUE',
+            'motocicleta': 'MOTOCICLETA',
+            'cuatrimoto': 'CUATROMOTO',
+            'taxi': 'TAXI',
+            'gasolina': 'GASOLINA',
+            'electrico_hibrido': 'ELÉCTRICO O HIBRIDO',
+            'hibrido': 'HIBRIDO',
+            'diesel': 'DIÉSEL',
+            'gas': 'GAS',
+            'gas_lp': 'GAS LP',
+            'no_usa': 'NO USA',
+            'otros': 'OTROS',
+            'dictamen': 'DICTAMNE',
+            'ambas': 'AMBAS',
+            'concesion': 'CONCESIÓN',
+            'denuncia': 'DENUNCIA',
+        }
+
+        # Llenar los campos del formulario
+        if '/AcroForm' in template_pdf.Root:
+            acroform = template_pdf.Root['/AcroForm']
+
+            if '/Fields' in acroform:
+                fields = acroform['/Fields']
+
+                # Llenar los campos del formulario
+                for campo_request, valor in datos_formulario.items():
+                    if valor is not None:
+                        campo_pdf = mapeo_campos.get(campo_request)
+                        if campo_pdf:
+                            # Buscar el campo en el PDF
+                            for field in fields:
+                                field_name = field.T
+
+                                # Decodificar el nombre del campo si es bytes
+                                if isinstance(field_name, bytes):
+                                    field_name = field_name.decode('utf-8', errors='ignore')
+
+                                # Eliminar paréntesis del nombre del campo (pdfrw los incluye)
+                                field_name_clean = field_name.strip('()')
+
+                                if field_name_clean == campo_pdf:
+                                    # Determinar el tipo de campo
+                                    field_type = field.FT
+
+                                    if field_type == '/Tx':  # Campo de texto
+                                        if isinstance(valor, bool):
+                                            # Si es boolean, convertir a string
+                                            field.V = str(valor)
+                                        else:
+                                            field.V = str(valor)
+                                    elif field_type == '/Btn':  # Campo de botón/checkbox
+                                        if valor:
+                                            # Para checkboxes, usamos el valor /Yes
+                                            field.V = pdfrw.PdfName('/Yes')
+                                        else:
+                                            field.V = pdfrw.PdfName('/Off')
+                                    break
+
+        # Generar el PDF en memoria
+        from io import BytesIO
+        output_stream = BytesIO()
+        pdfrw.PdfWriter().write(output_stream, template_pdf)
+        output_stream.seek(0)
+
+        return output_stream.read()
+
+    except Exception as e:
+        import traceback
+        traceback_str = "".join(traceback.format_exception(None, e, e.__traceback__))
+        print(f"Error al llenar formulario PDF: {traceback_str}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar el PDF: {str(e)}",
+        )
 
 
 """
@@ -704,6 +953,63 @@ async def enviar_archivos_por_correo(
             mensaje="Error al enviar el correo",
             error=str(e),
             id_operacion=id_operacion,
+        )
+
+
+@app.post("/llenar_padron/")
+async def llenar_padron(request: PdfFormRequest):
+    """
+    Endpoint que recibe datos para llenar el formulario PDF V1J AUTO
+    y retorna el PDF generado con los campos llenos.
+
+    **Parámetros de la Solicitud (JSON):**
+    - Todos los campos del formulario son opcionales
+    - Campos de texto: valores string
+    - Campos de checkbox: valores boolean
+
+    **Respuestas HTTP:**
+    - `200 OK`: Retorna el PDF generado con Content-Type: application/pdf
+    - `422 Unprocessable Entity`: Si los datos de entrada no cumplen con las validaciones
+    - `500 Internal Server Error`: Si ocurre un error durante la generación del PDF
+    """
+    try:
+        # Ruta al PDF template
+        pdf_template_path = os.path.join(
+            os.path.dirname(__file__), '..', 'FORMATO V1J AUTO.pdf'
+        )
+
+        # Verificar que el PDF template existe
+        if not os.path.exists(pdf_template_path):
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró el archivo PDF template",
+            )
+
+        # Convertir el modelo Pydantic a diccionario
+        datos_formulario = request.model_dump()
+
+        # Llenar el formulario PDF
+        pdf_content = llenar_formulario_pdf(pdf_template_path, datos_formulario)
+
+        # Retornar el PDF generado
+        from fastapi.responses import Response
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": "attachment; filename=FORMATO_V1J_AUTO_LLENO.pdf"
+            }
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        traceback_str = "".join(traceback.format_exception(None, e, e.__traceback__))
+        print(f"ERROR durante generación de PDF: {traceback_str}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor al generar el PDF: {str(e)}",
         )
 
 

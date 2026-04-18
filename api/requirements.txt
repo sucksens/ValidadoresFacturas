@@ -13,3 +13,5 @@ tenacity == 9.1.2
 #pycfdi-transform == 0.1.0
 # libreria para cargar variables de entorno
 python-dotenv == 1.0.1
+# libreria para manipular PDFs
+PyPDF2 == 3.0.1
