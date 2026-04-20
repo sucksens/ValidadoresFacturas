@@ -1,3 +1,14 @@
 api/__pycache__/
 env_validador/
 api/.env
+
+# Archivos de prueba y desarrollo
+api/FORMATO_V1J_AUTO_LLENO_TEST.pdf
+api/FORMATO_V1J_AUTO_LLENO_TEST_LOCAL.pdf
+api/eval_pdf.py
+api/extraer_campos_pdf.py
+api/test_llenar_padron.py
+api/test_local_directo.py
+api/verificar_mapeo.py
+api/verificar_pdf.py
+plans/
