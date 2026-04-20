@@ -1,104 +1,185 @@
-# 🧩 ValidadorFacturas
+# ValidadorFacturas
 
-> Este proyecto contiene todo el código y partes del validador masivo y la API de validación de facturas con el SAT.
-
-[![Windows](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
-[![Linux](https://img.shields.io/badge/Platform-Linux-yellow.svg)]()
-[![Release](https://img.shields.io/badge/Release-v1.0-orange.svg)]()
+API REST para validación y cancelación de facturas CFDI con el SAT.
 
 ---
 
-## 🎯 Descripción
+## Descripcion
 
-Este proyecto tiene dos partes principales una que es la API Principal que se estara consumiendo, 
-donde se le manda informacion de una factura y se enviara al sat por validacion, 
-Y una seccion especifica para generar un trabajo que revise de manera masiva los datos de la base,
-todos los dias de los ultimos 3 meses. 
-
+Este proyecto contiene una API para validar y cancelar facturas CFDI con el SAT, 
+integrada con el servicio de MySuite para la cancelación de comprobantes fiscales.
 
 ---
 
-## ✨ Características API
+## Caracteristicas API
 
-- ✅ Valida el Estatus de una Factura.
-- ✅ Valida direcciones de correo electrónico.
-- ✅ Parsea archivos XML CFDI.
-- ✅ Envía archivos (XML y PDF) por correo electrónico.
-
-## ✨ Características Validador
-
-- ✅ Buscar Información del mes dado 
-- ✅ Validar Estatus 
-- ✅ Actulizar estatus en la Base  
-- 🚀 Próximamente:
-- Generar un wrap del vallidador para automatizar
+- Valida el estatus de una factura CFDI ante el SAT
+- Valida direcciones de correo electronico
+- Parsea archivos XML CFDI (versiones 3.2, 3.3 y 4.0)
+- Envia archivos (XML y PDF) por correo electronico
+- Cancela facturas CFDI 4.0 via MySuite
+- Llena formularios PDF para tramites vehiculares
 
 ---
 
-## 🛠 Instalación
+## Requisitos
 
-> Requisitos previos: `requirements.txt`
+- Python 3.8+
+- FastAPI
+- Uvicorn
 
-### Opción 1 – Desde fuente
-```bash
-git clone http://200.1.1.247:3002/senjuana/ValidadorFacturas.git
-
-cd ValidadorFacturas
+### Dependencias
 
 ```
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+pycfdi-transform
+pdfrw
+requests
+dns.resolver
+aiosmtplib
+email
+tenacity
+```
 
-### 2. Ejecución
+---
 
-1. Por definir
+## Instalacion
 
-## 📧 Endpoint de Envío de Archivos por Correo
+```bash
+git clone https://github.com/sucksens/ValidadoresFacturas.git
 
-El endpoint `/enviar_archivos_por_correo/` permite enviar archivos XML y PDF a un correo electrónico.
+cd ValidadoresFacturas/api
 
-### Configuración
+cp .env.example .env
+```
 
-Antes de usar el endpoint, crea un archivo `.env` en la carpeta `api/` con las siguientes variables:
+### Configuracion del archivo .env
 
 ```env
+# Servidor SMTP para envio de correos
 SMTP_HOST=tu-smtp-server.com
 SMTP_PORT=587
 SMTP_USER=usuario@tu-dominio.com
-SMTP_PASSWORD=tu_contraseña
+SMTP_PASSWORD=tu_password
 SMTP_USE_TLS=true
-SMTP_FROM=noreply@dominio.com
+SMTP_FROM=noreply@tu-dominio.com
+
+# MySuite para cancelacion de facturas
+MYSUITE_URL=https://api.mysuite.com
+MYSUITE_TOKEN=tu_token_aqui
 ```
 
-### Uso del Endpoint
-
-**URL**: `POST /enviar_archivos_por_correo/`
-
-**Parámetros (multipart/form-data)**:
-- `xml`: Archivo XML a adjuntar
-- `pdf`: Archivo PDF a adjuntar
-- `email_destino`: Correo electrónico destinatario
-- `asunto`: Asunto del correo
-- `mensaje_cuerpo`: Cuerpo del mensaje (opcional, por defecto "Archivos adjuntos")
-
-### Ejemplo de Request (cURL)
+### Ejecucion
 
 ```bash
-curl -X POST "http://localhost:8000/enviar_archivos_por_correo/" \
-  -F "xml=@factura.xml" \
-  -F "pdf=@factura.pdf" \
-  -F "email_destino=cliente@ejemplo.com" \
-  -F "asunto=Factura adjunta" \
-  -F "mensaje_cuerpo=Adjunto encontrará la factura en formato XML y PDF"
+pip install -r requirements.txt
+uvicorn main:app --reload
 ```
 
-### Respuesta
+La API estara disponible en: http://localhost:8000
+
+Documentacion Swagger: http://localhost:8000/docs
+
+---
+
+## Endpoints
+
+### Validar Factura
+
+Valida el estatus de una factura CFDI ante el SAT.
+
+**URL**: `POST /validar_factura/`
 
 ```json
 {
-  "exito": true,
-  "mensaje": "Correo enviado exitosamente a cliente@ejemplo.com",
-  "error": null,
-  "id_operacion": "123e4567-e89b-12d3-a456-426614174000"
+  "rfc_emisor": "XAXX010101000",
+  "rfc_receptor": "XEXX010101000",
+  "total": 1000.00,
+  "uuid": "uuid-guia-123"
 }
 ```
 
+---
 
+### Validar Email
+
+Valida si un correo electronico existe mediante verificacion MX y SMTP.
+
+**URL**: `POST /validar_email/`
+
+```json
+{
+  "email": "correo@ejemplo.com",
+  "tipo": false
+}
+```
+
+---
+
+### Parsear XML
+
+Parsea archivos XML CFDI y extrae los datos.
+
+**URL**: `POST /parsear_xml/`
+
+Parametros: Archivo XML (multipart/form-data)
+
+---
+
+### Enviar Archivos por Correo
+
+Envia archivos XML y PDF por correo electronico.
+
+**URL**: `POST /enviar_archivos_por_correo/`
+
+Parametros (multipart/form-data):
+- `xml`: Archivo XML
+- `pdf`: Archivo PDF
+- `email_destino`: Correo destinatario
+- `asunto`: Asunto del correo
+- `mensaje_cuerpo`: Cuerpo del mensaje
+
+---
+
+### Cancelar Factura (CFDI 4.0)
+
+Cancela facturas CFDI version 4.0 usando el servicio de MySuite.
+
+**URL**: `POST /cancelar_factura/`
+
+```json
+{
+  "rfc": "XAXX010101000",
+  "tipo": "emitidos",
+  "uuids": ["uuid-a-cancelar"],
+  "foliosSustitucion": ["uuid-sustituto"],
+  "motivo": "01"
+}
+```
+
+**Codigos de motivo de cancelacion:**
+- `01`: Comprobante emitido con errores con relacion (requiere foliosSustitucion)
+- `02`: Comprobante emitido con errores sin relacion
+- `03`: No se llevo a cabo la operacion
+- `04`: Operacion nominativa relacionada en la factura
+
+---
+
+### Llenar Padron
+
+Llena el formulario PDF V1J AUTO con los datos proporcionados.
+
+**URL**: `POST /llenar_padron/`
+
+Parametros: Objeto JSON con los campos del formulario (todos opcionales)
+
+---
+
+## Documentacion
+
+Una vez ejecutando la aplicacion, accede a:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
