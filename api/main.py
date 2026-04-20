@@ -32,6 +32,9 @@ from dotenv import load_dotenv
 import PyPDF2
 import pdfrw
 
+# Import para cancelar facturas via MySuite
+import requests
+
 # Cargar variables de entorno
 load_dotenv()
 
@@ -85,8 +88,12 @@ class PdfFormRequest(BaseModel):
     col: Optional[str] = None
     postal: Optional[str] = None
     correo_1: Optional[str] = Field(default=None, alias="correo_1")
-    denominacion_razon_social_1: Optional[str] = Field(default=None, alias="denominacion_razon_social_1")
-    denominacion_razon_social_2: Optional[str] = Field(default=None, alias="denominacion_razon_social_2")
+    denominacion_razon_social_1: Optional[str] = Field(
+        default=None, alias="denominacion_razon_social_1"
+    )
+    denominacion_razon_social_2: Optional[str] = Field(
+        default=None, alias="denominacion_razon_social_2"
+    )
     regimen_sociedad: Optional[str] = Field(default=None, alias="regimen_sociedad")
     entre: Optional[str] = None
     y_de: Optional[str] = Field(default=None, alias="y_de")
@@ -176,6 +183,47 @@ class XmlResponse(BaseModel):
     )
     error: Optional[str] = Field(
         description="Mensaje de error si el XML no pudo ser parseado", default=None
+    )
+
+
+class CancelacionRequest(BaseModel):
+    """
+    Modelo de solicitud para cancelar facturas CFDI 4.0 via MySuite
+    """
+
+    rfc: Annotated[
+        str, Field(min_length=12, max_length=13, description="RFC del emisor")
+    ]
+    tipo: Annotated[str, Field(description="Tipo de CFDI: 'emitidos' o 'recibidos'")]
+    uuids: Annotated[
+        list[str], Field(min_length=1, description="Lista de UUIDs a cancelar")
+    ]
+    foliosSustitucion: Optional[list[str]] = Field(
+        default=None, description="UUIDs de los CFDI que sustituyen al cancelado"
+    )
+    motivo: Annotated[
+        str, Field(description="Código de motivo de cancelación (01, 02, 03, 04)")
+    ]
+
+
+class CancelacionResponse(BaseModel):
+    """
+    Modelo de respuesta para el endpoint de cancelación de facturas
+    """
+
+    exito: bool = Field(
+        description="Indica si la cancelación fue procesada exitosamente"
+    )
+    mensaje: str = Field(description="Mensaje descriptivo del resultado")
+    resultado: Optional[dict] = Field(
+        default=None,
+        description="Respuesta de MySuite con el detalle de la cancelación",
+    )
+    id_operacion: uuid_lib.UUID = Field(
+        description="ID único generado para esta operación"
+    )
+    error: Optional[str] = Field(
+        default=None, description="Mensaje de error sifalló la cancelación"
     )
 
 
@@ -305,97 +353,97 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
 
         # Crear un diccionario de mapeo entre campos del request y campos del PDF
         mapeo_campos = {
-            'entidad': 'ENTIDAD',
-            'ext': 'EXT',
-            'int_': 'INT',
-            'col': 'COL',
-            'postal': 'POSTAL',
-            'correo_1': 'CORREO 1',
-            'denominacion_razon_social_1': 'DENOMINACIÓN O RAZON SOCIAL_1',
-            'denominacion_razon_social_2': 'DENOMINACIÓN O RAZON SOCIAL_2',
-            'regimen_sociedad': 'RÉGIMEN DE SOCIEDAD',
-            'entre': 'ENTRE',
-            'y_de': 'Y DE',
-            'calle': 'CALLE',
-            'tipo_vialidad': 'TIPO DE VIALIDAD',
-            'mpo': 'MPO',
-            'marca': 'MARCA',
-            'tipo': 'TIPO',
-            'rfc': 'Registro Federal Contribuyente',
-            'curp': 'CURP',
-            'apellido_paterno': 'APELLIDO PATERNO',
-            'apellido_materno': 'APELLIDO MATERNO',
-            'nombre': 'NOMBRE',
-            'num_escritura': 'Núm Escritura',
-            'foja': 'FOJA',
-            'modelo': 'MODELO',
-            'no_motor': 'NO MOTOR',
-            'serie': 'SERIE',
-            'color': 'COLOR',
-            'folio_fiscal': 'FOLIO FISCAL',
-            'telefono': 'TELEFONO',
-            'mes_2': 'Mes_2',
-            'anio': 'Año',
-            'ndp': 'NDP',
-            'registro_estatal': 'Registro Estatal',
-            'mes_final': 'MES FINAL',
-            'fecha_final': 'FECHA FINAL',
-            'anio_2': 'AÑO',
-            'libro': 'LIBRO',
-            'localidad': 'LOCALIDAD',
-            'dia_2': 'Día_2',
-            'anio_3': 'Año_2',
-            'dia': 'Día',
-            'tipo_sol': 'TipoSol',
-            'mes': 'Mes',
-            'lugar_fecha': 'Lugar y fecha',
-            'placa_ant': 'PLACA ANT',
-            'calle_posterior': 'CALLER POSTERIOR',
-            'no_placa': 'No Placa',
-            'entidad_federativa': 'ENTIDAD FEDERATIVA',
-            'no': 'NO',
-            'n_orf': 'N ORF',
-            'facturacion': 'FACTURACIÓN',
-            'trasera': 'TRASERA',
-            'cp': 'CP',
-            'pn': 'PN',
-            'delamtera': 'DELAMTERA',
-            'ninguna': 'NINGUNA',
-            'unica_motocicleta': 'UNICA PARA MOTOCICLETA',
-            'servicios_pub': 'SERVICIOS PUB',
-            'servicios_pri': 'SERVICIOS PRI',
-            'camioneta': 'CAMIONETA',
-            'camion': 'CAMIÓN',
-            'minibus': 'MINIBÚS',
-            'remolque': 'REMOLQUE',
-            'motocicleta': 'MOTOCICLETA',
-            'cuatrimoto': 'CUATROMOTO',
-            'taxi': 'TAXI',
-            'gasolina': 'GASOLINA',
-            'electrico_hibrido': 'ELÉCTRICO O HIBRIDO',
-            'hibrido': 'HIBRIDO',
-            'diesel': 'DIÉSEL',
-            'gas': 'GAS',
-            'gas_lp': 'GAS LP',
-            'no_usa': 'NO USA',
-            'otros': 'OTROS',
-            'dictamen': 'DICTAMNE',
-            'ambas': 'AMBAS',
-            'concesion': 'CONCESIÓN',
-            'denuncia': 'DENUNCIA',
-            'pedimento': 'PEDIMENTO',
+            "entidad": "ENTIDAD",
+            "ext": "EXT",
+            "int_": "INT",
+            "col": "COL",
+            "postal": "POSTAL",
+            "correo_1": "CORREO 1",
+            "denominacion_razon_social_1": "DENOMINACIÓN O RAZON SOCIAL_1",
+            "denominacion_razon_social_2": "DENOMINACIÓN O RAZON SOCIAL_2",
+            "regimen_sociedad": "RÉGIMEN DE SOCIEDAD",
+            "entre": "ENTRE",
+            "y_de": "Y DE",
+            "calle": "CALLE",
+            "tipo_vialidad": "TIPO DE VIALIDAD",
+            "mpo": "MPO",
+            "marca": "MARCA",
+            "tipo": "TIPO",
+            "rfc": "Registro Federal Contribuyente",
+            "curp": "CURP",
+            "apellido_paterno": "APELLIDO PATERNO",
+            "apellido_materno": "APELLIDO MATERNO",
+            "nombre": "NOMBRE",
+            "num_escritura": "Núm Escritura",
+            "foja": "FOJA",
+            "modelo": "MODELO",
+            "no_motor": "NO MOTOR",
+            "serie": "SERIE",
+            "color": "COLOR",
+            "folio_fiscal": "FOLIO FISCAL",
+            "telefono": "TELEFONO",
+            "mes_2": "Mes_2",
+            "anio": "Año",
+            "ndp": "NDP",
+            "registro_estatal": "Registro Estatal",
+            "mes_final": "MES FINAL",
+            "fecha_final": "FECHA FINAL",
+            "anio_2": "AÑO",
+            "libro": "LIBRO",
+            "localidad": "LOCALIDAD",
+            "dia_2": "Día_2",
+            "anio_3": "Año_2",
+            "dia": "Día",
+            "tipo_sol": "TipoSol",
+            "mes": "Mes",
+            "lugar_fecha": "Lugar y fecha",
+            "placa_ant": "PLACA ANT",
+            "calle_posterior": "CALLER POSTERIOR",
+            "no_placa": "No Placa",
+            "entidad_federativa": "ENTIDAD FEDERATIVA",
+            "no": "NO",
+            "n_orf": "N ORF",
+            "facturacion": "FACTURACIÓN",
+            "trasera": "TRASERA",
+            "cp": "CP",
+            "pn": "PN",
+            "delamtera": "DELAMTERA",
+            "ninguna": "NINGUNA",
+            "unica_motocicleta": "UNICA PARA MOTOCICLETA",
+            "servicios_pub": "SERVICIOS PUB",
+            "servicios_pri": "SERVICIOS PRI",
+            "camioneta": "CAMIONETA",
+            "camion": "CAMIÓN",
+            "minibus": "MINIBÚS",
+            "remolque": "REMOLQUE",
+            "motocicleta": "MOTOCICLETA",
+            "cuatrimoto": "CUATROMOTO",
+            "taxi": "TAXI",
+            "gasolina": "GASOLINA",
+            "electrico_hibrido": "ELÉCTRICO O HIBRIDO",
+            "hibrido": "HIBRIDO",
+            "diesel": "DIÉSEL",
+            "gas": "GAS",
+            "gas_lp": "GAS LP",
+            "no_usa": "NO USA",
+            "otros": "OTROS",
+            "dictamen": "DICTAMNE",
+            "ambas": "AMBAS",
+            "concesion": "CONCESIÓN",
+            "denuncia": "DENUNCIA",
+            "pedimento": "PEDIMENTO",
         }
 
         # Llenar los campos del formulario
-        if '/AcroForm' in template_pdf.Root:
-            acroform = template_pdf.Root['/AcroForm']
+        if "/AcroForm" in template_pdf.Root:
+            acroform = template_pdf.Root["/AcroForm"]
 
             # Forzar al visor de PDF a regenerar las apariencias visuales
             # de los campos del formulario (sin esto, se muestran los datos viejos)
-            acroform.update(pdfrw.PdfDict(NeedAppearances=pdfrw.PdfObject('true')))
+            acroform.update(pdfrw.PdfDict(NeedAppearances=pdfrw.PdfObject("true")))
 
-            if '/Fields' in acroform:
-                fields = acroform['/Fields']
+            if "/Fields" in acroform:
+                fields = acroform["/Fields"]
 
                 # Crear un mapeo inverso: nombre_campo_pdf -> valor
                 mapeo_inverso = {}
@@ -403,47 +451,52 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
                     campo_pdf = mapeo_campos.get(campo_request)
                     if campo_pdf:
                         mapeo_inverso[campo_pdf] = valor
-                
 
                 def procesar_campo(field):
                     """Procesa un campo del PDF: lo llena o lo limpia.
                     Si tiene campos hijos (Kids), los procesa recursivamente."""
                     field_name = field.T
                     if isinstance(field_name, bytes):
-                        field_name = field_name.decode('utf-8', errors='ignore')
-                    
+                        field_name = field_name.decode("utf-8", errors="ignore")
+
                     # Limpiar el nombre del campo: quitar paréntesis y espacios
-                    field_name_clean = field_name.strip('() ').strip() if field_name else None
+                    field_name_clean = (
+                        field_name.strip("() ").strip() if field_name else None
+                    )
 
                     field_type = field.FT
 
                     # Eliminar la apariencia visual cacheada
-                    if '/AP' in field:
-                        del field['/AP']
-                    
+                    if "/AP" in field:
+                        del field["/AP"]
+
                     # Procesar este campo si tiene tipo definido
                     if field_type and field_name_clean:
                         if field_name_clean in mapeo_inverso:
                             valor = mapeo_inverso[field_name_clean]
-                            if field_type == '/Tx':
+                            if field_type == "/Tx":
                                 if valor is not None:
-                                    field.V = pdfrw.objects.pdfstring.PdfString.encode(str(valor))
+                                    field.V = pdfrw.objects.pdfstring.PdfString.encode(
+                                        str(valor)
+                                    )
                                 else:
-                                    field.V = pdfrw.objects.pdfstring.PdfString.encode('')
-                            elif field_type == '/Btn':
+                                    field.V = pdfrw.objects.pdfstring.PdfString.encode(
+                                        ""
+                                    )
+                            elif field_type == "/Btn":
                                 if valor:
-                                    field.V = pdfrw.PdfName('Yes')
-                                    field.AS = pdfrw.PdfName('Yes')
+                                    field.V = pdfrw.PdfName("Yes")
+                                    field.AS = pdfrw.PdfName("Yes")
                                 else:
-                                    field.V = pdfrw.PdfName('Off')
-                                    field.AS = pdfrw.PdfName('Off')
+                                    field.V = pdfrw.PdfName("Off")
+                                    field.AS = pdfrw.PdfName("Off")
                         else:
                             # Campo no mapeado: limpiar
-                            if field_type == '/Tx':
-                                field.V = pdfrw.objects.pdfstring.PdfString.encode('')
-                            elif field_type == '/Btn':
-                                field.V = pdfrw.PdfName('Off')
-                                field.AS = pdfrw.PdfName('Off')
+                            if field_type == "/Tx":
+                                field.V = pdfrw.objects.pdfstring.PdfString.encode("")
+                            elif field_type == "/Btn":
+                                field.V = pdfrw.PdfName("Off")
+                                field.AS = pdfrw.PdfName("Off")
 
                     # Procesar campos hijos recursivamente
                     if field.Kids:
@@ -456,6 +509,7 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
 
         # Generar el PDF en memoria
         from io import BytesIO
+
         output_stream = BytesIO()
         pdfrw.PdfWriter().write(output_stream, template_pdf)
         output_stream.seek(0)
@@ -464,6 +518,7 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
 
     except Exception as e:
         import traceback
+
         traceback_str = "".join(traceback.format_exception(None, e, e.__traceback__))
         print(f"Error al llenar formulario PDF: {traceback_str}")
         raise HTTPException(
@@ -1004,7 +1059,7 @@ async def llenar_padron(request: PdfFormRequest):
     try:
         # Ruta al PDF template
         pdf_template_path = os.path.join(
-            os.path.dirname(__file__), '..', 'FORMATO V1J AUTO.pdf'
+            os.path.dirname(__file__), "..", "FORMATO V1J AUTO.pdf"
         )
 
         # Verificar que el PDF template existe
@@ -1022,12 +1077,13 @@ async def llenar_padron(request: PdfFormRequest):
 
         # Retornar el PDF generado
         from fastapi.responses import Response
+
         return Response(
             content=pdf_content,
             media_type="application/pdf",
             headers={
                 "Content-Disposition": "attachment; filename=FORMATO_V1J_AUTO_LLENO.pdf"
-            }
+            },
         )
 
     except HTTPException:
@@ -1039,6 +1095,178 @@ async def llenar_padron(request: PdfFormRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error interno del servidor al generar el PDF: {str(e)}",
+        )
+
+
+MOTIVOS_CANCELACION = {
+    "01": "Comprobante emitido con errores con relación",
+    "02": "Comprobante emitido con errores sin relación",
+    "03": "No se llevó a cabo la operación",
+    "04": "Operación nominativa relacionada en la factura",
+}
+
+MOTIVOS_REQUIERE_SUSTITUCION = ["01"]
+
+
+@app.post("/cancelar_factura/", response_model=CancelacionResponse)
+async def cancelar_factura(request: CancelacionRequest):
+    """
+    Endpoint que cancela facturas CFDI 4.0 usando el servicio de MySuite.
+
+    **Parámetros de la Solicitud (JSON):**
+    - `rfc`: RFC del emisor (12 o 13 caracteres)
+    - `tipo`: Tipo de CFDI ("emitidos" o "recibidos")
+    - `uuids`: Lista de UUIDs de los comprobantes a cancelar
+    - `foliosSustitucion`: UUIDs de los CFDI que sustituyen al cancelado (opcional, requerido si motivo es "01")
+    - `motivo`: Código de motivo de cancelación (01, 02, 03, 04)
+
+    **Códigos de motivo:**
+    - "01": Comprobante emitido con errores con relación (requiere foliosSustitucion)
+    - "02": Comprobante emitido con errores sin relación
+    - "03": No se llevó a cabo la operación
+    - "04": Operación nominativa relacionada en la factura
+
+    **Respuestas HTTP:**
+    - `200 OK`: Retorna un `CancelacionResponse` con el resultado de la cancelación
+    - `400 Bad Request`: Si los parámetros son inválidos
+    - `422 Unprocessable Entity`: Si los datos de entrada no cumplen con las validaciones
+    - `500 Internal Server Error`: Si ocurre un error durante el proceso
+    """
+    id_operacion = uuid_lib.uuid4()
+
+    try:
+        motivo = request.motivo
+        if motivo not in MOTIVOS_CANCELACION:
+            return CancelacionResponse(
+                exito=False,
+                mensaje=f"Motivo de cancelación inválido: {motivo}",
+                resultado=None,
+                id_operacion=id_operacion,
+                error=f"Motivos válidos: {', '.join(MOTIVOS_CANCELACION.keys())}",
+            )
+
+        if motivo in MOTIVOS_REQUIERE_SUSTITUCION and not request.foliosSustitucion:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="El motivo de cancelación requiere folios de sustitución",
+                resultado=None,
+                id_operacion=id_operacion,
+                error=f"El motivo '{motivo}' ({MOTIVOS_CANCELACION[motivo]}) requiere especificar foliosSustitucion",
+            )
+
+        mysuite_url = os.getenv("MYSUITE_URL")
+        mysuite_token = os.getenv("MYSUITE_TOKEN")
+
+        if not mysuite_url or not mysuite_token:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Configuración incompleta de MySuite",
+                resultado=None,
+                id_operacion=id_operacion,
+                error="Faltan las variables de entorno MYSUITE_URL o MYSUITE_TOKEN",
+            )
+
+        tipo = request.tipo.lower()
+        if tipo not in ["emitidos", "recibidos"]:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Tipo de CFDI inválido",
+                resultado=None,
+                id_operacion=id_operacion,
+                error="El tipo debe ser 'emitidos' o 'recibidos'",
+            )
+
+        url = f"{mysuite_url}/cfdi40/{request.rfc}/{tipo}/cancelar"
+
+        payload = {
+            "uuids": request.uuids,
+            "foliosSustitucion": request.foliosSustitucion,
+            "motivo": request.motivo,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {mysuite_token}",
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+
+        if response.status_code == 200:
+            try:
+                resultado = response.json()
+                return CancelacionResponse(
+                    exito=True,
+                    mensaje="Factura(s) cancelada(s) exitosamente",
+                    resultado=resultado,
+                    id_operacion=id_operacion,
+                    error=None,
+                )
+            except Exception:
+                return CancelacionResponse(
+                    exito=True,
+                    mensaje="Factura(s) cancelada(s) exitosamente",
+                    resultado={"raw_response": response.text},
+                    id_operacion=id_operacion,
+                    error=None,
+                )
+        elif response.status_code == 400:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Error en la solicitud de cancelación",
+                resultado=None,
+                id_operacion=id_operacion,
+                error=f"Error 400: {response.text}",
+            )
+        elif response.status_code == 401:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Error de autenticación con MySuite",
+                resultado=None,
+                id_operacion=id_operacion,
+                error="Token de MySuite inválido o expirado",
+            )
+        elif response.status_code == 403:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Permisos insuficientes",
+                resultado=None,
+                id_operacion=id_operacion,
+                error="No tienes permisos para cancelar facturas en MySuite",
+            )
+        else:
+            return CancelacionResponse(
+                exito=False,
+                mensaje="Error al cancelar la factura",
+                resultado=None,
+                id_operacion=id_operacion,
+                error=f"Error {response.status_code}: {response.text}",
+            )
+
+    except requests.exceptions.Timeout:
+        return CancelacionResponse(
+            exito=False,
+            mensaje="Tiempo de espera agotado al conectar con MySuite",
+            resultado=None,
+            id_operacion=id_operacion,
+            error="La solicitud tardó más de 60 segundos",
+        )
+    except requests.exceptions.ConnectionError:
+        return CancelacionResponse(
+            exito=False,
+            mensaje="Error de conexión con MySuite",
+            resultado=None,
+            id_operacion=id_operacion,
+            error="No se pudo conectar al servidor de MySuite",
+        )
+    except Exception as e:
+        traceback_str = "".join(traceback.format_exception(None, e, e.__traceback__))
+        print(f"ERROR durante cancelación: {traceback_str}")
+        return CancelacionResponse(
+            exito=False,
+            mensaje="Error interno del servidor",
+            resultado=None,
+            id_operacion=id_operacion,
+            error=str(e),
         )
 
 
