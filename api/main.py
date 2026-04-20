@@ -130,6 +130,7 @@ class PdfFormRequest(BaseModel):
     no: Optional[str] = None
     n_orf: Optional[str] = Field(default=None, alias="n_orf")
     facturacion: Optional[str] = None
+    pedimento: Optional[str] = None
 
     # Campos de checkbox (boolean)
     trasera: Optional[bool] = None
@@ -382,53 +383,76 @@ def llenar_formulario_pdf(pdf_template_path: str, datos_formulario: dict) -> byt
             'ambas': 'AMBAS',
             'concesion': 'CONCESIÓN',
             'denuncia': 'DENUNCIA',
+            'pedimento': 'PEDIMENTO',
         }
 
         # Llenar los campos del formulario
         if '/AcroForm' in template_pdf.Root:
             acroform = template_pdf.Root['/AcroForm']
 
+            # Forzar al visor de PDF a regenerar las apariencias visuales
+            # de los campos del formulario (sin esto, se muestran los datos viejos)
+            acroform.update(pdfrw.PdfDict(NeedAppearances=pdfrw.PdfObject('true')))
+
             if '/Fields' in acroform:
                 fields = acroform['/Fields']
 
-                # Llenar los campos del formulario
+                # Crear un mapeo inverso: nombre_campo_pdf -> valor
+                mapeo_inverso = {}
                 for campo_request, valor in datos_formulario.items():
                     campo_pdf = mapeo_campos.get(campo_request)
                     if campo_pdf:
-                        # Buscar el campo en el PDF
-                        for field in fields:
-                            field_name = field.T
+                        mapeo_inverso[campo_pdf] = valor
+                
 
-                            # Decodificar el nombre del campo si es bytes
-                            if isinstance(field_name, bytes):
-                                field_name = field_name.decode('utf-8', errors='ignore')
+                def procesar_campo(field):
+                    """Procesa un campo del PDF: lo llena o lo limpia.
+                    Si tiene campos hijos (Kids), los procesa recursivamente."""
+                    field_name = field.T
+                    if isinstance(field_name, bytes):
+                        field_name = field_name.decode('utf-8', errors='ignore')
+                    
+                    # Limpiar el nombre del campo: quitar paréntesis y espacios
+                    field_name_clean = field_name.strip('() ').strip() if field_name else None
 
-                            # Eliminar paréntesis del nombre del campo (pdfrw los incluye)
-                            field_name_clean = field_name.strip('()')
+                    field_type = field.FT
 
-                            if field_name_clean == campo_pdf:
-                                # Determinar el tipo de campo
-                                field_type = field.FT
+                    # Eliminar la apariencia visual cacheada
+                    if '/AP' in field:
+                        del field['/AP']
+                    
+                    # Procesar este campo si tiene tipo definido
+                    if field_type and field_name_clean:
+                        if field_name_clean in mapeo_inverso:
+                            valor = mapeo_inverso[field_name_clean]
+                            if field_type == '/Tx':
+                                if valor is not None:
+                                    field.V = pdfrw.objects.pdfstring.PdfString.encode(str(valor))
+                                else:
+                                    field.V = pdfrw.objects.pdfstring.PdfString.encode('')
+                            elif field_type == '/Btn':
+                                if valor:
+                                    field.V = pdfrw.PdfName('Yes')
+                                    field.AS = pdfrw.PdfName('Yes')
+                                else:
+                                    field.V = pdfrw.PdfName('Off')
+                                    field.AS = pdfrw.PdfName('Off')
+                        else:
+                            # Campo no mapeado: limpiar
+                            if field_type == '/Tx':
+                                field.V = pdfrw.objects.pdfstring.PdfString.encode('')
+                            elif field_type == '/Btn':
+                                field.V = pdfrw.PdfName('Off')
+                                field.AS = pdfrw.PdfName('Off')
 
-                                if field_type == '/Tx':  # Campo de texto
-                                    if valor is not None:
-                                        if isinstance(valor, bool):
-                                            # Si es boolean, convertir a string
-                                            field.V = str(valor)
-                                        else:
-                                            field.V = str(valor)
-                                    else:
-                                        field.V = ''
-                                elif field_type == '/Btn':  # Campo de botón/checkbox
-                                    if valor is not None:
-                                        if valor:
-                                            # Para checkboxes, usamos el valor /Yes
-                                            field.V = pdfrw.PdfName('/Yes')
-                                        else:
-                                            field.V = pdfrw.PdfName('/Off')
-                                    else:
-                                        field.V = pdfrw.PdfName('/Off')
-                                break
+                    # Procesar campos hijos recursivamente
+                    if field.Kids:
+                        for kid in field.Kids:
+                            procesar_campo(kid)
+
+                # Recorrer TODOS los campos del PDF recursivamente
+                for field in fields:
+                    procesar_campo(field)
 
         # Generar el PDF en memoria
         from io import BytesIO
